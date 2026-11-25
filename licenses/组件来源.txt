@@ -1,0 +1,14 @@
+﻿NanoDrop 1.6.1 · GPL-3.0-or-later
+本包包含应用源码、构建脚本，以及所用 iOpenPod 和 iPodDB 模块的源码。各组件保留各自许可证。
+
+iPodDB / iOpenPod 2.1.4 · John Gibbons
+https://github.com/TheRealSavi/iOpenPod/tree/e206b8059059a8cc7a5e0ed1fd0571418c1ffb45
+FFmpeg 9.0.2 · GPL v3 构建，随 imageio-ffmpeg 0.8.1 的 Windows wheel 分发
+https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+https://www.gyan.dev/ffmpeg/builds/
+https://github.com/imageio/imageio-ffmpeg
+Mutagen · https://github.com/quodlibet/mutagen
+PyCryptodome · https://github.com/Legrandin/pycryptodome
+Python · https://www.python.org/downloads/
+TkinterDnD2 · https://github.com/Eliav2/tkinterdnd2
+PyInstaller · https://github.com/pyinstaller/pyinstaller

@@ -1,0 +1,17 @@
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+imageio-ffmpeg==0.8.1
+mutagen==1.48.1
+whenever==0.11.0
+tzdata==2026.6
+tzlocal==5.4.5
+wasmtime==38.0.0
+pycryptodome==4.6.0
+pillow==13.0.0
+tkinterdnd2==0.7.0
+importlib-resources==7.1.0
+packaging==26.4
+setuptools==84.2.1
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3

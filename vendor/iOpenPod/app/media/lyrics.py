@@ -1,0 +1,225 @@
+"""Transform captured media bytes, independently of optional full-file tagging."""
+
+from __future__ import annotations
+
+import io
+from pathlib import PurePosixPath
+from typing import Any, BinaryIO, Protocol, cast
+
+import mutagen
+import mutagen.id3 as id3_frames
+from mutagen.aiff import AIFF
+from mutagen.id3 import ID3, ID3NoHeaderError
+from mutagen.mp3 import MP3
+from mutagen.mp4 import MP4
+from mutagen.wave import WAVE
+
+from iOpenPod.app.media.lyrics_compatibility import verify_native_lyrics
+from iOpenPod.app.media.tags import read_tag_values
+
+_FRAMES: Any = id3_frames
+_ID3_SUFFIXES = frozenset((".mp3", ".wav", ".wave", ".aif", ".aiff", ".aifc"))
+_MP4_SUFFIXES = frozenset((".m4a", ".m4b", ".m4v", ".mp4", ".mov"))
+
+
+class _TaggedMedia(Protocol):
+    tags: Any
+
+    def add_tags(self) -> None: ...
+
+    def save(self, *args: Any, **kwargs: Any) -> None: ...
+
+
+class _MediaFactory(Protocol):
+    def __call__(self, filething: BinaryIO, **kwargs: Any) -> _TaggedMedia: ...
+
+
+class _MutagenFileReader(Protocol):
+    def __call__(
+        self, *, fileobj: BinaryIO, filename: str
+    ) -> mutagen.FileType | None: ...
+
+
+class _ID3Version(Protocol):
+    @property
+    def version(self) -> tuple[int, ...]: ...
+
+
+def _no_padding(_info: object) -> int:
+    return 0
+
+
+def embedded_lyrics(parsed: Any) -> str:
+    """Read unsynchronized text without treating a database flag as lyrics."""
+    return next(
+        (
+            tag.value
+            for tag in read_tag_values(getattr(parsed, "tags", None))
+            if tag.name == "lyrics"
+        ),
+        "",
+    )
+
+
+def read_lyrics_stream(stream: BinaryIO, file_name: str) -> str:
+    """Read text from a caller-owned private media stream without closing it."""
+    stream.seek(0)
+    try:
+        if PurePosixPath(file_name).suffix.casefold() in {".aac", ".adif", ".adts"}:
+            try:
+                tags = cast("Any", ID3)(stream)
+            except ID3NoHeaderError:
+                return ""
+            return next(
+                (tag.value for tag in read_tag_values(tags) if tag.name == "lyrics"), ""
+            )
+        # Mutagen's loadfile decorator supplies these keyword arguments at runtime.
+        read_file = cast(
+            "_MutagenFileReader",
+            mutagen.File,  # pyright: ignore[reportUnknownMemberType]
+        )
+        parsed = read_file(fileobj=stream, filename=file_name)
+        if parsed is None:
+            raise ValueError("Could not identify media for lyrics preservation.")
+        return embedded_lyrics(parsed)
+    except mutagen.MutagenError as error:
+        raise ValueError(f"Could not read embedded lyrics: {error}") from error
+    finally:
+        stream.seek(0)
+
+
+def rewrite_lyrics(
+    data: bytes, file_name: str, lyrics: str, *, native_compatibility: bool = False
+) -> bytes:
+    """Prepare lyrics on a private byte buffer and verify by reparsing.
+
+    Existing ID3 versions are retained when compatible; new tags use v2.3 UTF-16.
+    Native preparation converts incompatible v2.4 tags on this private copy to
+    v2.3, accepting loss of version-specific metadata. No tag padding is added.
+    A compatible unchanged value returns the original bytes, including padding.
+    Native validation may repair an encoding mismatch or convert an incompatible
+    layout even when a general Host reader returns the requested text.
+    """
+    buffer = io.BytesIO(data)
+    rewrite_lyrics_stream(
+        buffer, file_name, lyrics, native_compatibility=native_compatibility
+    )
+    return buffer.getvalue()
+
+
+def rewrite_lyrics_stream(
+    buffer: BinaryIO,
+    file_name: str,
+    lyrics: str,
+    *,
+    native_compatibility: bool = False,
+) -> None:
+    """Update a private, seekable media copy and verify its embedded lyrics."""
+    suffix = PurePosixPath(file_name).suffix.casefold()
+    if suffix not in _ID3_SUFFIXES | _MP4_SUFFIXES:
+        raise ValueError(
+            f"Embedded lyrics are unsupported for {suffix or 'this file type'}."
+        )
+    lyrics.encode("utf-16-le")
+    factory = (
+        MP4
+        if suffix in _MP4_SUFFIXES
+        else MP3
+        if suffix == ".mp3"
+        else WAVE
+        if suffix in (".wav", ".wave")
+        else AIFF
+    )
+
+    def load(buffer: BinaryIO) -> _TaggedMedia:
+        buffer.seek(0)
+        return cast("_MediaFactory", factory)(
+            buffer, **({} if suffix in _MP4_SUFFIXES else {"translate": False})
+        )
+
+    try:
+        audio = load(buffer)
+        if _matches(audio, lyrics):
+            if not native_compatibility:
+                return
+            try:
+                verify_native_lyrics(buffer, file_name, lyrics)
+            except ValueError:
+                # Equal text can still use an unsupported encoding or native
+                # layout. First try a focused rewrite, then convert incompatible
+                # v2.4 tags below if the native reader still rejects the result.
+                pass
+            else:
+                return
+        id3_version = (
+            cast("_ID3Version", audio.tags).version
+            if isinstance(audio.tags, ID3)
+            else (2, 3, 0)
+        )
+        if id3_version[:2] == (2, 2):
+            raise ValueError(
+                "Lyrics edits require converting this legacy ID3v2.2 tag explicitly first; automatic conversion could discard unknown frames."
+            )
+        version = 4 if id3_version[1] == 4 else 3
+        if audio.tags is None:
+            audio.add_tags()
+        tags = audio.tags
+        if tags is None:
+            raise ValueError(f"Could not create embedded metadata for {file_name}.")
+        if isinstance(tags, ID3):
+            tags = cast("Any", tags)
+            tags.delall("USLT")
+            if lyrics:
+                tags.add(
+                    _FRAMES.USLT(
+                        encoding=3 if version == 4 else 1,
+                        lang="eng",
+                        desc="",
+                        text=lyrics,
+                    )
+                )
+            buffer.seek(0)
+            audio.save(buffer, v2_version=version, padding=_no_padding)
+        else:
+            if lyrics:
+                tags["\xa9lyr"] = [lyrics]
+            else:
+                tags.pop("\xa9lyr", None)
+            buffer.seek(0)
+            audio.save(buffer, padding=_no_padding)
+        buffer.flush()
+        if not _matches(load(buffer), lyrics):
+            raise ValueError("Embedded lyrics failed read-back verification.")
+        if native_compatibility:
+            try:
+                verify_native_lyrics(buffer, file_name, lyrics)
+            except ValueError:
+                if version != 4 or not isinstance(tags, ID3):
+                    raise
+                # Only Storage-owned staging reaches native preparation. Loss of
+                # v2.4-only metadata is acceptable on the iPod copy; Host files
+                # and encoded audio are untouched. A downgrade is not evidence
+                # by itself: verify the complete lyrics and native layout again.
+                cast("Any", tags).update_to_v23()
+                buffer.seek(0)
+                audio.save(buffer, v2_version=3, padding=_no_padding)
+                buffer.flush()
+                if not _matches(load(buffer), lyrics):
+                    raise ValueError(
+                        "Embedded lyrics failed read-back verification."
+                    ) from None
+                verify_native_lyrics(buffer, file_name, lyrics)
+    except (mutagen.MutagenError, OSError) as error:
+        raise ValueError(
+            f"Could not prepare embedded lyrics for {file_name}: {error}"
+        ) from error
+
+
+def _matches(audio: _TaggedMedia, lyrics: str) -> bool:
+    tags = audio.tags
+    if tags is None:
+        return not lyrics
+    if isinstance(tags, ID3):
+        frames = cast("Any", tags).getall("USLT")
+        return (len(frames) == 1 and frames[0].text == lyrics) if lyrics else not frames
+    return bool(tags.get("\xa9lyr", []) == ([lyrics] if lyrics else []))

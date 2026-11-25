@@ -1,0 +1,42 @@
+﻿NanoDrop 1.6.1 · Windows x64
+
+使用
+双击 NanoDrop.exe，连接第三代 iPod nano，等待窗口显示盘符与现有歌曲数。
+将本地音乐拖入窗口，或点击「添加歌曲」「添加文件夹」，然后点击「导入到 iPod」。
+导入完成后，在 Windows 资源管理器中安全弹出 iPod。
+兼容的 MP3、AAC-LC M4A 及 16 位 ALAC 可按原文件导入。FLAC、WAV、OGG 等按需转换为 AAC。
+「设备曲库」显示每首歌在 iPod 上的文件大小。点击「大小」列可切换排序，选中单曲可查看精确字节数。文件缺失时会显示提示，大小前的 ≈ 表示本次只能读取曲库记录值。
+「检索方式」可选「按曲名」或「按歌手」，适用于导入后的联网匹配和「设备曲库」里的匹配。按歌手检索会列出该歌手的候选歌曲。在核对窗口可以切换方式、输入关键词并点「重新检索」。
+在「核对候选歌曲」窗口，按 Ctrl+F 或点击「筛选当前结果」，输入曲名、歌手或专辑的关键词即可在本次候选中查找。多个词用空格分隔，列表会显示同时包含这些词的版本。「清空」恢复本次的全部结果。
+「待导入」中勾选「导入后逐首处理」，选择「联网匹配」或「手动编辑」。只处理本次新加入的歌曲。可跳过单曲或结束核对。已有歌曲从「设备曲库」选中后点击「联网匹配歌曲资料」或「手动编辑」。
+在「手动编辑」里可以改曲名、歌手和专辑，直接填写专辑或从单行 TXT 导入。可粘贴歌词、导入 TXT 或 LRC、选择本地封面，然后点击「保存到 iPod」。LRC 会转换为 nano 可显示的纯文本。曲名、歌手和专辑更新到 iPod 曲库，歌词写入设备音频，封面写入设备缩略图库。
+在候选表中按艺术家、专辑和时长选择版本。曲名、艺术家名称、专辑名、封面和歌词均可独立勾选。核对「写入后」预览，点击「确认写入 iPod」。候选中有值且与现有曲库不同的文字项默认勾选。空缺的字段保留设备原值。曲名、艺术家与专辑更新到 iPod 曲库，封面写入设备缩略图库，歌词嵌入 iPod 上的音频。
+检索会清理曲名前的编号和音质标注，根据所选字段查找候选。配置的 AI 可为该字段提供修正检索词。候选曲名来自实际目录记录。未配置 AI 或服务暂时不可用时，应用以本地相似度排列目录结果。
+按曲名或歌手检索时，应用并行查询网易云音乐、QQ 音乐、Deezer 和 LRCLIB，必要时补查 MusicBrainz。候选表的「目录来源」显示匹配到该版本的平台。封面取自相应音乐目录或 Cover Art Archive，歌词取自 LRCLIB。单个平台暂时不可用时，其他平台的结果仍可核对。启用 AI 后，你选择的服务会收到曲名、歌手、专辑、时长、检索词和候选版本（含目录来源），用于排序和建议检索词。在「工具 → 搜索 AI 设置（API Key）」输入自己的密钥并保存。默认使用 DeepSeek，也可以填写兼容 Chat Completions 的 HTTPS 基础地址和模型。更换服务地址时需重新输入对应密钥。在同一窗口可以清除配置。公开版首次使用需自行配置，密钥只存入当前账户的 Windows 凭据管理器。
+补回缺失音频时，将原先由 NanoDrop 导入的同一文件再导入即可。程序沿用曲库记录和播放列表。若本机原件与设备上曾编辑过的文件大小不同，请使用操作备份中的音频恢复。
+按住 Ctrl 或 Shift 可多选歌曲，点击「删除所选歌曲」并确认。删除会同步移除播放列表中的对应条目。要查找备份，在「工具」中打开曲库备份文件夹，删除或更新的原文件保存在对应设备的「操作备份」子目录中。
+
+在 Windows x64 上重建
+使用带 Tcl/Tk 的 64 位 Python 3.12。本次构建使用 Python 3.12.14。
+在解压后的源码目录打开 PowerShell，依次运行
+
+    py -3.12 -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+    .\.venv\Scripts\python.exe -m PyInstaller --noconfirm NanoDrop.spec
+
+生成的程序位于 dist\NanoDrop.exe。运行成品无需另装 Python、FFmpeg、Apple Music 或 iTunes。
+
+验证
+以下命令在电脑上的临时文件夹建立测试曲库，验证导入、去重和中断恢复。
+
+    $env:PYTHONPATH = (Resolve-Path vendor).Path
+    .\.venv\Scripts\python.exe verify_import.py
+    .\.venv\Scripts\python.exe verify_matching.py
+    .\.venv\Scripts\python.exe verify_regressions.py
+    .\.venv\Scripts\python.exe verify_search_ui.py
+
+已连接第三代 iPod nano，且曲库中有歌曲时，可运行以下命令验证多选删除、封面编码、歌词写入、文件大小和中断恢复。测试仅读取真实设备，在电脑的临时副本执行写入。
+
+    .\.venv\Scripts\python.exe verify_edits.py
+
+开源组件的许可与来源位于 licenses 目录，应用采用 GPL-3.0-or-later。
